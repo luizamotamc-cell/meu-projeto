@@ -1,1 +1,170 @@
 
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cotações</title>
+<style>
+  :root {
+    --bg: #f3f5f7; --surface: #ffffff; --ink: #14202b; --muted: #5b6b79;
+    --line: #d9e0e6; --accent: #0b6e4f; --up: #0b6e4f; --down: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f171e; --surface: #17222b; --ink: #e8eef2; --muted: #93a3b0;
+      --line: #263540; --accent: #4cc39a; --up: #4cc39a; --down: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 56px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
+  section {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px; margin-bottom: 20px;
+  }
+  h2 { font-size: 1.05rem; margin: 0 0 14px; }
+  .conv { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 4px; }
+  input, select {
+    width: 100%; padding: 10px 12px; font-size: 1rem; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .resultado {
+    grid-column: 1 / -1; font-size: 1.6rem; font-weight: 650;
+    font-variant-numeric: tabular-nums; margin-top: 4px;
+  }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 500; color: var(--muted); font-size: 0.85rem; }
+  tr:last-child td { border-bottom: 0; }
+  .code { font-weight: 650; }
+  .nome { display: block; color: var(--muted); font-size: 0.8rem; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .barra { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  button {
+    padding: 9px 16px; font-size: 0.95rem; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--surface); border: 0; font-weight: 600;
+  }
+  button:disabled { opacity: 0.6; cursor: wait; }
+  #status { color: var(--muted); font-size: 0.85rem; }
+  .erro { color: var(--down); }
+  @media (max-width: 480px) { .conv { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cotações em reais</h1>
+  <p class="sub">Valores de compra atualizados a cada 30 segundos pela AwesomeAPI.</p>
+
+  <section aria-labelledby="t-conv">
+    <h2 id="t-conv">Conversor</h2>
+    <div class="conv">
+      <div><label for="valor">Valor</label><input id="valor" type="number" min="0" step="any" value="100"></div>
+      <div><label for="de">De</label><select id="de"></select></div>
+      <div></div>
+      <div><label for="para">Para</label><select id="para"></select></div>
+      <div class="resultado" id="resultado" aria-live="polite">—</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="t-cot">
+    <div class="barra">
+      <h2 id="t-cot">Cotações</h2>
+      <div><span id="status">Carregando…</span> <button id="atualizar" type="button">Atualizar agora</button></div>
+    </div>
+    <table>
+      <thead><tr><th>Moeda</th><th>Compra (R$)</th><th>Venda (R$)</th><th>Variação</th></tr></thead>
+      <tbody id="tabela"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+  const MOEDAS = {
+    USD: "Dólar americano", EUR: "Euro", GBP: "Libra esterlina",
+    ARS: "Peso argentino", JPY: "Iene japonês", BTC: "Bitcoin"
+  };
+  const URL_API = "https://economia.awesomeapi.com.br/json/last/" +
+    Object.keys(MOEDAS).map(c => c + "-BRL").join(",");
+
+  const $ = id => document.getElementById(id);
+  let taxas = { BRL: 1 }; // valor de 1 unidade de cada moeda em reais
+
+  const brl = n => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: n < 1 ? 4 : 2 });
+
+  function preencherSelects() {
+    const codigos = ["BRL", ...Object.keys(MOEDAS)];
+    for (const sel of [$("de"), $("para")]) {
+      sel.innerHTML = codigos.map(c => `<option value="${c}">${c}</option>`).join("");
+    }
+    $("de").value = "USD";
+    $("para").value = "BRL";
+  }
+
+  function converter() {
+    const valor = parseFloat($("valor").value);
+    const de = $("de").value, para = $("para").value;
+    if (isNaN(valor) || !taxas[de] || !taxas[para]) { $("resultado").textContent = "—"; return; }
+    const resultado = valor * taxas[de] / taxas[para];
+    $("resultado").textContent = resultado.toLocaleString("pt-BR", { maximumFractionDigits: 6 }) + " " + para;
+  }
+
+  function desenharTabela(dados) {
+    $("tabela").innerHTML = Object.keys(MOEDAS).map(c => {
+      const q = dados[c + "BRL"];
+      if (!q) return "";
+      const var_ = parseFloat(q.pctChange);
+      const cls = var_ >= 0 ? "up" : "down";
+      const sinal = var_ >= 0 ? "+" : "";
+      return `<tr>
+        <td><span class="code">${c}</span><span class="nome">${MOEDAS[c]}</span></td>
+        <td>${brl(parseFloat(q.bid))}</td>
+        <td>${brl(parseFloat(q.ask))}</td>
+        <td class="${cls}">${sinal}${var_.toFixed(2)}%</td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function carregar() {
+    const btn = $("atualizar");
+    btn.disabled = true;
+    try {
+      const resp = await fetch(URL_API);
+      if (!resp.ok) throw new Error("A API respondeu com erro " + resp.status);
+      const dados = await resp.json();
+      taxas = { BRL: 1 };
+      for (const c of Object.keys(MOEDAS)) {
+        if (dados[c + "BRL"]) taxas[c] = parseFloat(dados[c + "BRL"].bid);
+      }
+      desenharTabela(dados);
+      converter();
+      $("status").classList.remove("erro");
+      $("status").textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
+    } catch (e) {
+      $("status").classList.add("erro");
+      $("status").textContent = "Não foi possível buscar as cotações. Verifique sua conexão e tente de novo.";
+      console.error(e);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  preencherSelects();
+  ["valor", "de", "para"].forEach(id => $(id).addEventListener("input", converter));
+  $("atualizar").addEventListener("click", carregar);
+  carregar();
+  setInterval(carregar, 30000);
+</script>
+</body>
+</html>
